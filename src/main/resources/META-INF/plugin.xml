@@ -1,0 +1,82 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
+    <id>org.devikon.app.badge.app-badge</id>
+
+    <!-- Public plugin name should be written in Title Case.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-name -->
+    <name>App Badge</name>
+
+    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+    <vendor url="https://www.yourcompany.com">Devikon Inc.</vendor>
+
+    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
+    <description><![CDATA[
+    Adds customizable text badges to image files, particularly useful for marking Android app icons with
+    environment indicators (ALPHA, BETA, DEV, etc.).
+
+    <h2>Features</h2>
+    <ul>
+        <li><b>Add badges to images:</b> Easily add environment indicators or other text to your app icons</li>
+        <li><b>Live preview:</b> See how your badge will look in real-time with interactive positioning</li>
+        <li><b>Batch processing:</b> Add badges to multiple images at once</li>
+        <li><b>Project analysis:</b> Auto-detection of project type and environment to suggest appropriate badges</li>
+        <li><b>Highly customizable:</b> Choose from various badge shapes, colors, fonts, and positions</li>
+        <li><b>Templates:</b> Pre-defined badge styles for quick application</li>
+        <li><b>Drag-and-drop positioning:</b> Interactively place your badge exactly where you want it</li>
+    </ul>
+
+    <h2>Usage</h2>
+    <ol>
+        <li>Right-click on an image file or directory in the Project view</li>
+        <li>Select "Add Badge..." from the context menu</li>
+        <li>Configure the badge options in the dialog</li>
+        <li>Click OK to apply the badge</li>
+    </ol>
+    ]]></description>
+
+    <!-- Product and plugin compatibility requirements.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <!-- Extension points defined by the plugin.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService serviceImplementation="org.devikon.app.badge.services.BadgeService"/>
+        <applicationService serviceImplementation="org.devikon.app.badge.services.ImageService"/>
+
+        <notificationGroup id="Badge Plugin Notifications"
+                           displayType="BALLOON"
+                           key="badge.notifications"/>
+
+        <projectConfigurable groupId="tools"
+                             displayName="Badge Generator"
+                             id="preferences.BadgeGeneratorSettings"
+                             instance="org.devikon.app.badge.settings.BadgeSettingsConfigurable"/>
+
+        <!-- Add Tool Window definition -->
+        <toolWindow id="Badge Generator"
+                    icon="/icons/badgeGenerator.svg"
+                    anchor="right"
+                    secondary="true"
+                    factoryClass="org.devikon.app.badge.ui.BadgeGeneratorToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="AddBadge.EnhancedAddBadgeAction"
+                class="org.devikon.app.badge.actions.EnhancedAddBadgeAction"
+                text="Add Badge..."
+                description="Add a text badge to an image file">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="EditSource"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <override-text place="ProjectViewPopupMenu" text="Add Badge..."/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift B"/>
+        </action>
+    </actions>
+
+    <applicationListeners>
+        <listener class="org.devikon.app.badge.listeners.BadgePluginStartupListener"
+                  topic="com.intellij.ide.AppLifecycleListener"/>
+    </applicationListeners>
+</idea-plugin>
