@@ -8,15 +8,22 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.CollectionComboBoxModel
-import com.intellij.ui.components.JBLabel
+import com.intellij.ui.ColorPanel
+import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.MutableProperty
+import com.intellij.ui.dsl.builder.bindIntValue
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.layout.ComponentPredicate
 import com.intellij.util.ui.JBUI
 import org.devikon.app.badge.integrations.ProjectIntegrations
-import org.devikon.app.badge.listeners.BadgePreviewComponent
 import org.devikon.app.badge.model.BadgeGravity
 import org.devikon.app.badge.model.BadgeOptions
 import org.devikon.app.badge.services.BadgeService
@@ -24,230 +31,398 @@ import org.devikon.app.badge.services.ImageService
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Insets
 import java.io.File
-import javax.swing.BorderFactory
-import javax.swing.JButton
-import javax.swing.JComboBox
 import javax.swing.JPanel
-import javax.swing.JSpinner
-import javax.swing.SpinnerNumberModel
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
+import kotlin.properties.Delegates
 
 /**
- * Main panel for the Badge Generator tool window.
+ * Modern badge generator tool window using IntelliJ UI DSL.
  */
 class BadgeGeneratorToolWindowPanel(private val project: Project) : JPanel(BorderLayout()) {
-
     private val badgeService = service<BadgeService>()
     private val imageService = service<ImageService>()
 
     // Selected files
     private var selectedFiles: List<VirtualFile> = emptyList()
 
-    // UI Controls
-    private val fileSelectionLabel = JBLabel("No files selected")
-    private val selectFilesButton = JButton("Select Image Files...")
-    private val templateComboBox = JComboBox<String>()
-    private val textField = JBTextField(10)
-    private val fontSizeSpinner = JSpinner(SpinnerNumberModel(28, 8, 100, 1))
-    private val gravityComboBox = JComboBox(BadgeGravity.values())
-    private val bgColorButton = ColorPickerButton(Color.WHITE)
-    private val textColorButton = ColorPickerButton(Color(102, 102, 102))
-    private val applyButton = JButton("Apply Badges")
-
-    // Preview panel
-    private val previewPanel = BadgePreviewComponent()
-
-    init {
-        setupUI()
-        setupListeners()
-
-        // Try to get a suggested badge template and text based on project
-        val recommendation = ProjectIntegrations.analyzeProjectStructure(project)
-        textField.text = recommendation.badgeText
-
-        // Find template in the combo box
-        for (i in 0 until templateComboBox.itemCount) {
-            if (templateComboBox.getItemAt(i) == recommendation.templateName) {
-                templateComboBox.selectedIndex = i
-                break
-            }
-        }
-
-        // Update preview
+    // Property delegates for badge options
+    private var badgeText by Delegates.observable("") { _, _, _ -> updatePreview() }
+    private var fontSize by Delegates.observable(28) { _, _, _ -> updatePreview() }
+    private var badgeShape by Delegates.observable(BadgeOptions.BadgeShape.RECTANGLE) { _, _, _ ->
+        updateCustomCornersVisibility()
         updatePreview()
     }
+    private var borderRadius by Delegates.observable(4) { _, _, _ -> updatePreview() }
+    private var backgroundColor by Delegates.observable(Color.WHITE) { _, _, _ -> updatePreview() }
+    private var textColor by Delegates.observable(Color(102, 102, 102)) { _, _, _ -> updatePreview() }
+    private var gravity by Delegates.observable(BadgeGravity.SOUTHEAST) { _, _, _ -> updatePreview() }
+    private var templateName by Delegates.observable("Default") { _, _, newValue -> applyTemplate(newValue) }
 
-    private fun setupUI() {
-        // Set border and minimum size
-        border = JBUI.Borders.empty(10)
-        minimumSize = Dimension(300, 500)
+    // Custom corner radius properties
+    private var useCustomCorners by Delegates.observable(false) { _, _, _ ->
+        updateCustomCornersVisibility()
+        updatePreview()
+    }
+    // Add a flag to prevent recursion
+    private var updatingCorners = false
 
-        // Set up the controls panel
-        val controlsPanel = JPanel(GridBagLayout())
-        val gbc = GridBagConstraints().apply {
-            fill = GridBagConstraints.HORIZONTAL
-            insets = Insets(5, 5, 5, 5)
-            gridx = 0
-            gridy = 0
-            weightx = 0.0
+    // Store the target file as a property of the panel
+    private var targetImageFile: File? = null
+
+    // Flag to prevent recursive updates
+    private var isUpdatingProperties = false
+
+    // Simplified property delegates that don't update each other
+    private var topLeftRadius by Delegates.observable(4) { _, _, _ ->
+        if (!isUpdatingProperties) {
+            if (linkCorners) {
+                synchronizeCornerRadii()
+            } else {
+                updatePreview()
+            }
         }
-
-        // File selection section
-        controlsPanel.add(JBLabel("Image Files:"), gbc.apply { gridy++ })
-
-        val fileSelectionPanel = JPanel(BorderLayout())
-        fileSelectionPanel.add(fileSelectionLabel, BorderLayout.CENTER)
-        fileSelectionPanel.add(selectFilesButton, BorderLayout.EAST)
-        controlsPanel.add(fileSelectionPanel, gbc.apply {
-            gridy++
-            gridwidth = 2
-            weightx = 1.0
-        })
-
-        // Reset gridwidth
-        gbc.apply {
-            gridwidth = 1
-            weightx = 0.0
-        }
-
-        // Badge configuration section
-        controlsPanel.add(JBLabel("Template:"), gbc.apply { gridy++ })
-
-        // Populate templates combo box
-        templateComboBox.model = CollectionComboBoxModel(BadgeOptions.TEMPLATES.keys.toList())
-        controlsPanel.add(templateComboBox, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        controlsPanel.add(JBLabel("Badge Text:"), gbc.apply {
-            gridx = 0
-            gridy++
-            weightx = 0.0
-        })
-        controlsPanel.add(textField, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        controlsPanel.add(JBLabel("Font Size:"), gbc.apply {
-            gridx = 0
-            gridy++
-            weightx = 0.0
-        })
-        controlsPanel.add(fontSizeSpinner, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        controlsPanel.add(JBLabel("Position:"), gbc.apply {
-            gridx = 0
-            gridy++
-            weightx = 0.0
-        })
-        controlsPanel.add(gravityComboBox, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        controlsPanel.add(JBLabel("Background:"), gbc.apply {
-            gridx = 0
-            gridy++
-            weightx = 0.0
-        })
-        controlsPanel.add(bgColorButton, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        controlsPanel.add(JBLabel("Text Color:"), gbc.apply {
-            gridx = 0
-            gridy++
-            weightx = 0.0
-        })
-        controlsPanel.add(textColorButton, gbc.apply {
-            gridx = 1
-            weightx = 1.0
-        })
-
-        // Add the controls to a scroll pane
-        val scrollPane = JBScrollPane(controlsPanel)
-        scrollPane.border = null
-
-        // Set up preview section
-        val previewLabel = JBLabel("Preview:")
-        previewPanel.preferredSize = Dimension(250, 150)
-        previewPanel.border = BorderFactory.createLoweredBevelBorder()
-
-        val previewContainer = JPanel(BorderLayout())
-        previewContainer.add(previewLabel, BorderLayout.NORTH)
-        previewContainer.add(previewPanel, BorderLayout.CENTER)
-        previewContainer.border = JBUI.Borders.empty(10, 0, 10, 0)
-
-        // Set up action button
-        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT))
-        buttonPanel.add(applyButton)
-
-        // Assemble the main layout
-        add(scrollPane, BorderLayout.CENTER)
-        add(previewContainer, BorderLayout.NORTH)
-        add(buttonPanel, BorderLayout.SOUTH)
     }
 
-    private fun setupListeners() {
-        // File selection button
-        selectFilesButton.addActionListener {
-            selectImageFiles()
-        }
+    private var topRightRadius by Delegates.observable(4) { _, _, _ ->
+        if (!isUpdatingProperties) updatePreview()
+    }
 
-        // Template selection
-        templateComboBox.addActionListener {
-            val selectedTemplate = templateComboBox.selectedItem as String? ?: return@addActionListener
-            applyTemplate(selectedTemplate)
+    private var bottomLeftRadius by Delegates.observable(4) { _, _, _ ->
+        if (!isUpdatingProperties) updatePreview()
+    }
+
+    private var bottomRightRadius by Delegates.observable(4) { _, _, _ ->
+        if (!isUpdatingProperties) updatePreview()
+    }
+
+    private var linkCorners by Delegates.observable(true) { _, _, newValue ->
+        if (newValue) {
+            synchronizeCornerRadii()
+        } else {
             updatePreview()
-        }
-
-        // Text field changes
-        textField.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = updatePreview()
-            override fun removeUpdate(e: DocumentEvent) = updatePreview()
-            override fun changedUpdate(e: DocumentEvent) = updatePreview()
-        })
-
-        // Font size spinner
-        fontSizeSpinner.addChangeListener { updatePreview() }
-
-        // Gravity combo box
-        gravityComboBox.addActionListener { updatePreview() }
-
-        // Color buttons
-        bgColorButton.addActionListener { updatePreview() }
-        textColorButton.addActionListener { updatePreview() }
-
-        // Apply button
-        applyButton.addActionListener {
-            applyBadgesToSelectedFiles()
         }
     }
 
     /**
-     * Apply a template to the UI controls.
+     * Synchronize all corner radii to match the top-left radius
+     * without triggering recursive property updates.
+     */
+    private fun synchronizeCornerRadii() {
+        isUpdatingProperties = true
+        try {
+            // Set all corners to match top-left
+            val radius = topLeftRadius
+            topRightRadius = radius
+            bottomLeftRadius = radius
+            bottomRightRadius = radius
+        } finally {
+            isUpdatingProperties = false
+            updatePreview()
+        }
+    }
+
+    // Preview panel
+    private val previewPanel = DynamicBadgePreview(
+        targetImageFile = targetImageFile
+    ).apply {
+        preferredSize = Dimension(250, 250)
+        minimumSize = Dimension(200, 200)
+    }
+
+    // UI panel
+    private lateinit var controlsPanel: DialogPanel
+
+    init {
+        // Set up the UI
+        border = JBUI.Borders.empty(8)
+        setupUI()
+
+        // Initialize with project-specific recommendation
+        val recommendation = ProjectIntegrations.analyzeProjectStructure(project)
+        badgeText = recommendation.badgeText
+        templateName = recommendation.templateName
+
+        // Update the UI with model values
+        controlsPanel.reset()
+        updatePreview()
+        updateCustomCornersVisibility()
+    }
+
+    private fun setupUI() {
+        // Create splitter for preview and controls
+        val splitter = JBSplitter(true, 0.4f)
+
+        // Create preview section
+        val previewContainer = panel {
+            row {
+                label("Preview (Drag to reposition)")
+                    .bold()
+            }
+            row {
+                cell(previewPanel)
+                    .resizableColumn()
+                    .align(Align.FILL)
+            }
+        }
+
+        // Create controls panel
+        controlsPanel = panel {
+            // File selection section
+            group("Image Files") {
+                row {
+                    button("Select Image Files...") {
+                        selectImageFiles()
+                    }
+                }
+                row {
+                    text(getFileSelectionDescription())
+                        .resizableColumn()
+                        .align(Align.FILL)
+                }
+                row {
+                    button("Apply Badges") {
+                        applyBadgesToSelectedFiles()
+                    }
+                        .enabled(selectedFiles.isNotEmpty())
+                }
+            }
+
+            // Badge configuration section
+            group("Badge Configuration") {
+                row("Template:") {
+                    comboBox(BadgeOptions.TEMPLATES.keys.toList())
+                        .bindItem({ templateName }, {
+                            if (it != null && it != templateName) {
+                                templateName = it
+                            }
+                        })
+                        .resizableColumn()
+                        .align(Align.FILL)
+                }
+
+                row("Badge Text:") {
+                    textField()
+                        .bindText({ badgeText }, {
+                            badgeText = it
+                        })
+                        .resizableColumn()
+                        .align(Align.FILL)
+                        .focused()
+                }
+
+                row("Font Size:") {
+                    spinner(8..100, 1)
+                        .bindIntValue({ fontSize }, {
+                            fontSize = it
+                        })
+                }
+
+                row("Position:") {
+                    comboBox(BadgeGravity.values().toList())
+                        .bindItem({ gravity }, {
+                            if (it != null) {
+                                gravity = it
+                            }
+                        })
+                }
+
+                row("Shape:") {
+                    comboBox(BadgeOptions.BadgeShape.values().toList())
+                        .bindItem({ badgeShape }, {
+                            if (it != null) {
+                                badgeShape = it
+                            }
+                        })
+                }
+
+                row("Border Radius:") {
+                    spinner(0..30, 1)
+                        .bindIntValue({ borderRadius }, {
+                            borderRadius = it
+                        })
+                        .enabledIf(borderRadiusPredicate())
+                }
+
+                // Custom corner radius controls
+                row {
+                    checkBox("Use Custom Corners")
+                        .bindSelected({ useCustomCorners }, { useCustomCorners = it })
+                        .enabledIf(customCornersPredicate())
+                }
+
+                row {
+                    checkBox("Link All Corners")
+                        .bindSelected({ linkCorners }, { linkCorners = it })
+                        .enabledIf(useCustomCornersPredicate())
+                }
+
+                // Corner radius spinners in a panel layout
+                panel {
+                    row("Top Left:") {
+                        spinner(0..30, 1)
+                            .bindIntValue({ topLeftRadius }, { topLeftRadius = it })
+                    }
+
+                    row("Top Right:") {
+                        spinner(0..30, 1)
+                            .bindIntValue({ topRightRadius }, { topRightRadius = it })
+                            .enabledIf(unlinkedCornersPredicate())
+                    }
+
+                    row("Bottom Left:") {
+                        spinner(0..30, 1)
+                            .bindIntValue({ bottomLeftRadius }, { bottomLeftRadius = it })
+                            .enabledIf(unlinkedCornersPredicate())
+                    }
+
+                    row("Bottom Right:") {
+                        spinner(0..30, 1)
+                            .bindIntValue({ bottomRightRadius }, { bottomRightRadius = it })
+                            .enabledIf(unlinkedCornersPredicate())
+                    }
+                }.visible(false).apply {
+                    name = "cornerRadiiPanel" // For finding it later
+                }
+            }
+
+            // Colors section
+            group("Colors") {
+                row("Background:") {
+                    val bgColorPanel = ColorPanel().apply {
+                        selectedColor = backgroundColor
+                    }
+                    cell(bgColorPanel)
+                        .bind(
+                            { it.selectedColor },
+                            { component, value -> component.selectedColor = value },
+                            propertyOf(backgroundColor, { backgroundColor }, { backgroundColor = it })
+                        )
+                        .resizableColumn()
+                        .align(Align.FILL)
+                }
+
+                row("Text Color:") {
+                    val textColorPanel = ColorPanel().apply {
+                        selectedColor = textColor
+                    }
+                    cell(textColorPanel)
+                        .bind(
+                            { it.selectedColor },
+                            { component, value -> component.selectedColor = value },
+                            propertyOf(textColor, { textColor }, { it?.let { textColor = it } })
+                        )
+                        .resizableColumn()
+                        .align(Align.FILL)
+                }
+            }
+        }
+
+        // Add scrolling to controls
+        val scrollPane = JBScrollPane(controlsPanel).apply {
+            border = JBUI.Borders.empty()
+            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = JBScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+        }
+
+        // Add components to splitter
+        splitter.firstComponent = previewContainer
+        splitter.secondComponent = scrollPane
+
+        // Add splitter to main panel
+        add(splitter, BorderLayout.CENTER)
+    }
+
+    // Show/hide custom corner controls based on current state
+    private fun updateCustomCornersVisibility() {
+        val cornersPanel = findComponentByName(controlsPanel, "cornerRadiiPanel")
+        cornersPanel?.isVisible = useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE
+
+        // Force UI refresh
+        controlsPanel.validate()
+        controlsPanel.repaint()
+    }
+
+    // Helper to find a component by name
+    private fun findComponentByName(parent: JPanel, name: String): JPanel? {
+        if (parent.name == name) return parent
+
+        for (component in parent.components) {
+            if (component is JPanel) {
+                if (component.name == name) return component
+
+                val found = findComponentByName(component, name)
+                if (found != null) return found
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Get description of selected files.
+     */
+    private fun getFileSelectionDescription(): String {
+        return when {
+            selectedFiles.isEmpty() -> "No files selected"
+            selectedFiles.size == 1 -> "Selected: ${selectedFiles[0].name}"
+            else -> "Selected: ${selectedFiles.size} image files"
+        }
+    }
+
+    /**
+     * Apply template to the UI controls.
      */
     private fun applyTemplate(templateName: String) {
         val template = BadgeOptions.TEMPLATES[templateName] ?: return
 
-        // Apply values to UI controls
-        textField.text = template.text
-        fontSizeSpinner.value = template.fontSize
-        gravityComboBox.selectedItem = template.gravity
-        bgColorButton.setSelectedColor(template.backgroundColor)
-        textColorButton.setSelectedColor(template.textColor)
+        badgeText = template.text
+        fontSize = template.fontSize
+        backgroundColor = template.backgroundColor
+        textColor = template.textColor
+        gravity = template.gravity
+        badgeShape = template.shape
+        borderRadius = template.borderRadius
+
+        // Handle custom corner radii
+        if (!template.hasUniformCorners()) {
+            useCustomCorners = true
+            linkCorners = false
+            topLeftRadius = template.getCornerRadius(BadgeOptions.Corner.TOP_LEFT)
+            topRightRadius = template.getCornerRadius(BadgeOptions.Corner.TOP_RIGHT)
+            bottomLeftRadius = template.getCornerRadius(BadgeOptions.Corner.BOTTOM_LEFT)
+            bottomRightRadius = template.getCornerRadius(BadgeOptions.Corner.BOTTOM_RIGHT)
+        } else {
+            useCustomCorners = false
+            linkCorners = true
+        }
+
+        // Update UI state
+        controlsPanel.reset()
+        updateCustomCornersVisibility()
+        updatePreview()
+    }
+
+    // Predicates for UI components
+    private fun borderRadiusPredicate() = object : ComponentPredicate() {
+        override fun invoke(): Boolean =
+            !useCustomCorners || badgeShape != BadgeOptions.BadgeShape.ROUNDED_RECTANGLE
+        override fun addListener(listener: (Boolean) -> Unit) {}
+    }
+
+    private fun customCornersPredicate() = object : ComponentPredicate() {
+        override fun invoke(): Boolean = badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE
+        override fun addListener(listener: (Boolean) -> Unit) {}
+    }
+
+    private fun useCustomCornersPredicate() = object : ComponentPredicate() {
+        override fun invoke(): Boolean =
+            useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE
+        override fun addListener(listener: (Boolean) -> Unit) {}
+    }
+
+    private fun unlinkedCornersPredicate() = object : ComponentPredicate() {
+        override fun invoke(): Boolean = !linkCorners
+        override fun addListener(listener: (Boolean) -> Unit) {}
     }
 
     /**
@@ -255,20 +430,33 @@ class BadgeGeneratorToolWindowPanel(private val project: Project) : JPanel(Borde
      */
     private fun updatePreview() {
         val options = getBadgeOptions()
-        previewPanel.updateOptions(options)
+        previewPanel.updateBadgeOptions(options)
     }
 
     /**
-     * Get badge options from the UI controls.
+     * Get badge options from current settings.
      */
     private fun getBadgeOptions(): BadgeOptions {
+        val position = previewPanel.getCurrentPosition()
+
         return BadgeOptions(
-            text = textField.text.ifEmpty { "SAMPLE" },
-            backgroundColor = bgColorButton.selectedColor,
-            textColor = textColorButton.selectedColor,
-            fontSize = fontSizeSpinner.value as Int,
-            gravity = gravityComboBox.selectedItem as BadgeGravity,
-            position = previewPanel.getCurrentPosition()
+            text = badgeText.ifEmpty { "SAMPLE" },
+            backgroundColor = backgroundColor,
+            textColor = textColor,
+            fontSize = fontSize,
+            gravity = gravity,
+            shape = badgeShape,
+            borderRadius = borderRadius,
+            position = position,
+            // Include custom corner radii when enabled
+            topLeftRadius = if (useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE)
+                topLeftRadius else null,
+            topRightRadius = if (useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE)
+                topRightRadius else null,
+            bottomLeftRadius = if (useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE)
+                bottomLeftRadius else null,
+            bottomRightRadius = if (useCustomCorners && badgeShape == BadgeOptions.BadgeShape.ROUNDED_RECTANGLE)
+                bottomRightRadius else null
         )
     }
 
@@ -291,28 +479,26 @@ class BadgeGeneratorToolWindowPanel(private val project: Project) : JPanel(Borde
                 extension in listOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
             }
 
-        val files = FileChooser.chooseFiles(fileChooserDescriptor, project, null)
+        val files = FileChooser.chooseFiles(fileChooserDescriptor, project, null).toList()
+
         if (files.isNotEmpty()) {
-            selectedFiles = files.asList()
+            selectedFiles = files
 
-            // Update the label
-            fileSelectionLabel.text = if (files.size == 1) {
-                files[0].name
-            } else {
-                "${files.size} image files selected"
-            }
+            // Update file selection text
+            controlsPanel.reset()
 
-            // If we have a single file, update the preview
+            // If we have a single file, store it and update the preview
             if (files.size == 1) {
-                val file = File(files[0].path)
-                previewPanel.setTargetImageFile(file)
-            } else {
-                // Create a generic preview
-                previewPanel.setTargetImageFile(null)
-            }
+                targetImageFile = File(files[0].path)
 
-            // Enable apply button
-            applyButton.isEnabled = true
+                // Instead of trying to set the file directly on previewPanel,
+                // we'll just update the preview with current options
+                updatePreview()
+            } else {
+                // Reset the target file and update the preview
+                targetImageFile = null
+                updatePreview()
+            }
         }
     }
 
@@ -332,8 +518,7 @@ class BadgeGeneratorToolWindowPanel(private val project: Project) : JPanel(Borde
         val options = getBadgeOptions()
 
         // Show progress
-        val progressManager = ProgressManager.getInstance()
-        progressManager.run(object : Task.Backgroundable(
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
             project,
             "Adding Badges to Images",
             true
@@ -369,5 +554,19 @@ class BadgeGeneratorToolWindowPanel(private val project: Project) : JPanel(Borde
                 }
             }
         })
+    }
+
+    /**
+     * Helper function to create a MutableProperty
+     */
+    private fun <V> propertyOf(
+        initialValue: V,
+        getter: () -> V,
+        setter: (V) -> Unit
+    ): MutableProperty<V> {
+        return object : MutableProperty<V> {
+            override fun get(): V = getter()
+            override fun set(value: V) = setter(value)
+        }
     }
 }

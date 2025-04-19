@@ -6,7 +6,8 @@ import java.io.File
 import java.io.Serializable
 
 /**
- * Enhanced configuration options for badge generation with templates and custom shapes.
+ * Enhanced configuration options for badge generation with templates, custom shapes,
+ * and individual corner radii support.
  */
 data class BadgeOptions(
     val text: String,
@@ -23,12 +24,44 @@ data class BadgeOptions(
     val shadowSize: Int = 4,
     val shape: BadgeShape = BadgeShape.RECTANGLE,
     val borderRadius: Int = 4,
+    // Individual corner radii (defaults to borderRadius if not specified)
+    val topLeftRadius: Int? = null,
+    val topRightRadius: Int? = null,
+    val bottomLeftRadius: Int? = null,
+    val bottomRightRadius: Int? = null,
     val borderColor: Color? = null,
     val borderWidth: Int = 0,
     val useGradient: Boolean = false,
     val gradientEndColor: Color? = null,
     val opacity: Float = 1.0f
 ) : Serializable {
+
+    /**
+     * Get the radius for a specific corner, falling back to the general borderRadius if not specified.
+     */
+    fun getCornerRadius(corner: Corner): Int {
+        return when (corner) {
+            Corner.TOP_LEFT -> topLeftRadius ?: borderRadius
+            Corner.TOP_RIGHT -> topRightRadius ?: borderRadius
+            Corner.BOTTOM_LEFT -> bottomLeftRadius ?: borderRadius
+            Corner.BOTTOM_RIGHT -> bottomRightRadius ?: borderRadius
+        }
+    }
+
+    /**
+     * Check if all corners have the same radius (uniform).
+     */
+    fun hasUniformCorners(): Boolean {
+        return topLeftRadius == null && topRightRadius == null &&
+                bottomLeftRadius == null && bottomRightRadius == null
+    }
+
+    /**
+     * Corner identifier enum for radius specification.
+     */
+    enum class Corner {
+        TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
+    }
 
     /**
      * Position can be specified as a percentage along an axis or as explicit x,y coordinates
@@ -43,12 +76,21 @@ data class BadgeOptions(
      * (since defaults are based on 192px images)
      */
     fun scaled(scale: Double): BadgeOptions {
+        val scaledTopLeft = topLeftRadius?.let { (it * scale).toInt().evenRounded().coerceAtLeast(1) }
+        val scaledTopRight = topRightRadius?.let { (it * scale).toInt().evenRounded().coerceAtLeast(1) }
+        val scaledBottomLeft = bottomLeftRadius?.let { (it * scale).toInt().evenRounded().coerceAtLeast(1) }
+        val scaledBottomRight = bottomRightRadius?.let { (it * scale).toInt().evenRounded().coerceAtLeast(1) }
+
         return copy(
             fontSize = (fontSize * scale).toInt(),
             paddingX = (paddingX * scale).toInt().evenRounded(),
             paddingY = (paddingY * scale).toInt().evenRounded(),
             shadowSize = (shadowSize * scale).toInt().coerceAtLeast(1),
             borderRadius = (borderRadius * scale).toInt().coerceAtLeast(1),
+            topLeftRadius = scaledTopLeft,
+            topRightRadius = scaledTopRight,
+            bottomLeftRadius = scaledBottomLeft,
+            bottomRightRadius = scaledBottomRight,
             borderWidth = (borderWidth * scale).toInt().coerceAtLeast(if (borderWidth > 0) 1 else 0)
         )
     }
@@ -162,6 +204,17 @@ data class BadgeOptions(
                 fontSize = 20,
                 shape = BadgeShape.PILL,
                 shadowSize = 2
+            ),
+
+            "Custom Corners" to BadgeOptions(
+                text = "NEW",
+                backgroundColor = Color(231, 76, 60),
+                textColor = Color.WHITE,
+                shape = BadgeShape.ROUNDED_RECTANGLE,
+                topLeftRadius = 15,
+                topRightRadius = 5,
+                bottomLeftRadius = 5,
+                bottomRightRadius = 15
             )
         )
 
