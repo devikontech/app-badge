@@ -431,10 +431,10 @@ class BadgePreviewComponent : JPanel() {
 
         // Add a simple app icon design
         g.color = JBColor(Color(255, 255, 255, 180), Color(255, 255, 255, 180))
-        g.fillOval(size/4, size/4, size/2, size/2)
+        g.fillOval(size / 4, size / 4, size / 2, size / 2)
 
         g.color = JBColor(Color(255, 255, 255, 40), Color(255, 255, 255, 40))
-        g.fillOval(size/3, size/3, size/3, size/3)
+        g.fillOval(size / 3, size / 3, size / 3, size / 3)
 
         g.dispose()
         return image
@@ -496,8 +496,8 @@ class BadgePreviewComponent : JPanel() {
 
                 // Draw drag handle
                 g2d.fillOval(
-                    offsetRect.x + offsetRect.width/2 - 3,
-                    offsetRect.y + offsetRect.height/2 - 3,
+                    offsetRect.x + offsetRect.width / 2 - 3,
+                    offsetRect.y + offsetRect.height / 2 - 3,
                     6, 6
                 )
             }
@@ -557,20 +557,73 @@ class BadgePreviewComponent : JPanel() {
     }
 
     /**
-     * Draw a highlight that matches the badge shape.
+     * Draw a highlight that matches the badge shape, including support for custom corner radii.
      */
     private fun drawShapedHighlight(g2d: Graphics2D, rect: Rectangle, shape: BadgeOptions.BadgeShape) {
         when (shape) {
             BadgeOptions.BadgeShape.RECTANGLE -> {
                 g2d.drawRect(rect.x, rect.y, rect.width, rect.height)
             }
+
             BadgeOptions.BadgeShape.ROUNDED_RECTANGLE -> {
-                val radius = badgeOptions.borderRadius * 2
-                g2d.drawRoundRect(
-                    rect.x, rect.y, rect.width, rect.height,
-                    radius, radius
-                )
+                if (badgeOptions.hasUniformCorners()) {
+                    // Standard rounded rectangle
+                    val radius = badgeOptions.borderRadius * 2
+                    g2d.drawRoundRect(
+                        rect.x, rect.y, rect.width, rect.height,
+                        radius, radius
+                    )
+                } else {
+                    // Custom rounded rectangle with different corner radii
+                    val path = Path2D.Float()
+
+                    // Get radii for each corner
+                    val topLeftRadius = badgeOptions.getCornerRadius(BadgeOptions.Corner.TOP_LEFT) * 2.toDouble()
+                    val topRightRadius = badgeOptions.getCornerRadius(BadgeOptions.Corner.TOP_RIGHT) * 2.toDouble()
+                    val bottomLeftRadius = badgeOptions.getCornerRadius(BadgeOptions.Corner.BOTTOM_LEFT) * 2.toDouble()
+                    val bottomRightRadius =
+                        badgeOptions.getCornerRadius(BadgeOptions.Corner.BOTTOM_RIGHT) * 2.toDouble()
+
+                    // Draw the path
+                    // Start from top-left corner
+                    path.moveTo(rect.x + topLeftRadius / 2, rect.y.toDouble())
+
+                    // Top edge and top-right corner
+                    path.lineTo(rect.x + rect.width - topRightRadius / 2, rect.y.toDouble())
+                    path.quadTo(
+                        rect.x + rect.width.toDouble(),
+                        rect.y.toDouble(),
+                        rect.x + rect.width.toDouble(),
+                        rect.y + topRightRadius / 2
+                    )
+
+                    // Right edge and bottom-right corner
+                    path.lineTo(rect.x + rect.width.toDouble(), rect.y + rect.height - bottomRightRadius / 2)
+                    path.quadTo(
+                        rect.x + rect.width.toDouble(),
+                        rect.y + rect.height.toDouble(),
+                        rect.x + rect.width - bottomRightRadius / 2,
+                        rect.y + rect.height.toDouble()
+                    )
+
+                    // Bottom edge and bottom-left corner
+                    path.lineTo(rect.x + bottomLeftRadius / 2, rect.y + rect.height.toDouble())
+                    path.quadTo(
+                        rect.x.toDouble(),
+                        rect.y + rect.height.toDouble(),
+                        rect.x.toDouble(),
+                        rect.y + rect.height - bottomLeftRadius / 2
+                    )
+
+                    // Left edge and top-left corner
+                    path.lineTo(rect.x.toDouble(), rect.y + topLeftRadius / 2)
+                    path.quadTo(rect.x.toDouble(), rect.y.toDouble(), rect.x + topLeftRadius / 2, rect.y.toDouble())
+
+                    path.closePath()
+                    g2d.draw(path)
+                }
             }
+
             BadgeOptions.BadgeShape.PILL -> {
                 val radius = rect.height
                 g2d.drawRoundRect(
@@ -578,15 +631,17 @@ class BadgePreviewComponent : JPanel() {
                     radius, radius
                 )
             }
+
             BadgeOptions.BadgeShape.CIRCLE -> {
                 val diameter = Math.max(rect.width, rect.height)
                 g2d.drawOval(
                     rect.x, rect.y, diameter, diameter
                 )
             }
+
             BadgeOptions.BadgeShape.TRIANGLE -> {
                 val path = Path2D.Float()
-                path.moveTo(rect.x + rect.width/2.0, rect.y.toDouble())
+                path.moveTo(rect.x + rect.width / 2.0, rect.y.toDouble())
                 path.lineTo(rect.x + rect.width.toDouble(), rect.y + rect.height.toDouble())
                 path.lineTo(rect.x.toDouble(), rect.y + rect.height.toDouble())
                 path.closePath()
@@ -616,7 +671,7 @@ class BadgePreviewComponent : JPanel() {
         val spinnerY = height / 2 + 15
 
         val angle = (System.currentTimeMillis() / 15) % 360
-        g2d.rotate(Math.toRadians(angle.toDouble()), spinnerX + spinnerSize/2.0, spinnerY + spinnerSize/2.0)
+        g2d.rotate(Math.toRadians(angle.toDouble()), spinnerX + spinnerSize / 2.0, spinnerY + spinnerSize / 2.0)
 
         g2d.stroke = BasicStroke(2f)
         g2d.color = JBColor.GRAY

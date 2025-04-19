@@ -173,31 +173,38 @@ class BadgeService {
             else -> Font("Dialog", Font.BOLD, options.fontSize)
         }
 
-        // Measure text dimensions
-        val metrics = getFontMetrics(font, options.text)
+        // Measure text dimensions with precise font metrics
+        val frc = FontRenderContext(null, true, true)
+        val textLayout = TextLayout(options.text, font, frc)
+        val bounds = textLayout.bounds
 
         // Calculate badge size based on shape
         val (badgeWidth, badgeHeight) = when (options.shape) {
             BadgeOptions.BadgeShape.CIRCLE -> {
-                val diameter = Math.max(metrics.width, metrics.height) +
+                val diameter = Math.max(bounds.width.toInt(), bounds.height.toInt()) +
                         Math.max(options.paddingX, options.paddingY) * 2
                 Pair(diameter, diameter)
             }
             BadgeOptions.BadgeShape.PILL -> {
-                val height = metrics.height + options.paddingY * 2
-                val width = metrics.width + options.paddingX * 2 + height/2 // Extra padding for rounded ends
+                val height = bounds.height.toInt() + options.paddingY * 2
+                val width = bounds.width.toInt() + options.paddingX * 2 + height/2 // Extra padding for rounded ends
                 Pair(width, height)
             }
             else -> {
-                val width = metrics.width + options.paddingX * 2
-                val height = metrics.height + options.paddingY * 2
+                val width = bounds.width.toInt() + options.paddingX * 2
+                val height = bounds.height.toInt() + options.paddingY * 2
                 Pair(width, height)
             }
         }
 
-        // Create the badge image
+        // Create the badge image with transparency
         val badge = BufferedImage(badgeWidth, badgeHeight, BufferedImage.TYPE_INT_ARGB)
         val g = badge.createGraphics()
+
+        // Clear the background to fully transparent
+        g.composite = AlphaComposite.getInstance(AlphaComposite.CLEAR)
+        g.fillRect(0, 0, badgeWidth, badgeHeight)
+        g.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER)
 
         // Apply quality rendering hints
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -228,15 +235,17 @@ class BadgeService {
             g.draw(shape)
         }
 
-        // Draw text
+        // Draw text with precise centering
         g.color = options.textColor
         g.font = font
 
-        // Calculate text position (centered)
-        val textX = (badgeWidth - metrics.width) / 2
-        val textY = (badgeHeight - metrics.height) / 2 + metrics.ascent
+        // Calculate text position (precisely centered)
+        val textX = (badgeWidth - bounds.width) / 2 - bounds.x
+        val textY = (badgeHeight - bounds.height) / 2 - bounds.y + textLayout.ascent
 
-        g.drawString(options.text, textX, textY)
+        // Draw the text at the calculated position
+        textLayout.draw(g, textX.toFloat(), textY.toFloat())
+
         g.dispose()
 
         // Cache the badge if it's not too large
@@ -249,6 +258,7 @@ class BadgeService {
 
     /**
      * Create a shape for the badge based on the specified shape type.
+     * Supports individual corner radius settings for rounded rectangle shapes.
      */
     private fun createBadgeShape(width: Int, height: Int, options: BadgeOptions): Shape {
         return when (options.shape) {
@@ -256,8 +266,21 @@ class BadgeService {
                 Rectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat())
             }
             BadgeOptions.BadgeShape.ROUNDED_RECTANGLE -> {
-                val radius = options.borderRadius.toFloat()
-                RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), radius * 2, radius * 2)
+                if (options.hasUniformCorners()) {
+                    // Use standard rounded rectangle if all corners have the same radius
+                    val radius = options.borderRadius.toFloat()
+                    RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), radius * 2, radius * 2)
+                } else {
+                    // Create custom shape with different corner radii
+                    createCustomRoundedRectangle(
+                        width.toFloat(),
+                        height.toFloat(),
+                        options.getCornerRadius(BadgeOptions.Corner.TOP_LEFT).toFloat() * 2,
+                        options.getCornerRadius(BadgeOptions.Corner.TOP_RIGHT).toFloat() * 2,
+                        options.getCornerRadius(BadgeOptions.Corner.BOTTOM_LEFT).toFloat() * 2,
+                        options.getCornerRadius(BadgeOptions.Corner.BOTTOM_RIGHT).toFloat() * 2
+                    )
+                }
             }
             BadgeOptions.BadgeShape.PILL -> {
                 val radius = height / 2f
@@ -275,6 +298,59 @@ class BadgeService {
                 path
             }
         }
+    }
+
+    /**
+     * Create a rounded rectangle with different corner radii for each corner.
+     * This creates a proper transparent shape with the specified corner radii.
+     */
+    private fun createCustomRoundedRectangle(
+        width: Float,
+        height: Float,
+        topLeftRadius: Float,
+        topRightRadius: Float,
+        bottomLeftRadius: Float,
+        bottomRightRadius: Float
+    ): Shape {
+        val path = Path2D.Float()
+
+        // Start from top-left corner
+        path.moveTo(topLeftRadius / 2, 0f)
+
+        // Top edge and top-right corner
+        path.lineTo(width - topRightRadius / 2, 0f)
+        if (topRightRadius > 0) {
+            path.quadTo(width, 0f, width, topRightRadius / 2)
+        } else {
+            path.lineTo(width, 0f)
+        }
+
+        // Right edge and bottom-right corner
+        path.lineTo(width, height - bottomRightRadius / 2)
+        if (bottomRightRadius > 0) {
+            path.quadTo(width, height, width - bottomRightRadius / 2, height)
+        } else {
+            path.lineTo(width, height)
+        }
+
+        // Bottom edge and bottom-left corner
+        path.lineTo(bottomLeftRadius / 2, height)
+        if (bottomLeftRadius > 0) {
+            path.quadTo(0f, height, 0f, height - bottomLeftRadius / 2)
+        } else {
+            path.lineTo(0f, height)
+        }
+
+        // Left edge and top-left corner
+        path.lineTo(0f, topLeftRadius / 2)
+        if (topLeftRadius > 0) {
+            path.quadTo(0f, 0f, topLeftRadius / 2, 0f)
+        } else {
+            path.lineTo(0f, 0f)
+        }
+
+        path.closePath()
+        return path
     }
 
     /**
